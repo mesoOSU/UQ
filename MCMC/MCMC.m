@@ -125,7 +125,7 @@ for i = 1:S
     sigma_vpsc(:,i) = VPSC(theta_chain(1,i*D-3),theta_chain(1,i*D-2),theta_chain(1,i*D-1),theta_chain(1,i*D),strain_inc);
 end
 
-[initial_log_likelihood,vpsc_prop] = log_likelihood(theta_chain(1,:),Lambda_chain(:,:,1),delta_chain(1),sigma_obs,strain_inc,sigma_vpsc,1); %likelihood of initiation parameters, 1is for block 1
+[initial_log_likelihood,vpsc_prop] = log_likelihood(S,N,D,theta_chain(1,:),Lambda_chain(:,:,1),delta_chain(1),sigma_obs,strain_inc,sigma_vpsc,1); %likelihood of initiation parameters, 1is for block 1
 sigma_vpsc = vpsc_prop;
 
 initial_log_posterior = log_posterior(initial_log_likelihood,theta_chain(1,:),Delta_chain(:,:,1),delta_chain(1),a_delta,b_delta,V_not,v_not,D);
@@ -187,11 +187,7 @@ for k = 1:num_iter
             
             u = unifrnd(0,1);
    
-            [proposed_log_likelihood,vpsc_prop] = log_likelihood(proposed_parameter,Lambda_chain(:,:,k),delta_chain(k),sigma_obs,strain_inc,sigma_vpsc,b); %likelihood of proposed (k)
-            %yout updates the column of yin which corresponds to the
-            %current block. VPSC is evaluated at proposed parameters and saved in yin(block)
-            %if the parameters are accepted yin = yout, if not, yin not
-            %updated
+            [proposed_log_likelihood,vpsc_prop] = log_likelihood(S,N,D,proposed_parameter,Lambda_chain(:,:,k),delta_chain(k),sigma_obs,strain_inc,sigma_vpsc,b); %likelihood of proposed (k)
       
             proposed_log_posterior = log_posterior(proposed_log_likelihood,proposed_parameter,Lambda_chain(:,:,k),delta_chain(k),a_delta,b_delta,V_not,v_not,D);
     
@@ -221,7 +217,7 @@ for k = 1:num_iter
         
     end
     
-    %sample delta and Lambda from full conditional (gibbs sampler)
+        %sample delta and Lambda from full conditional (gibbs sampler)
         %samples directly from posterior, always accepted
         
         %sample Lambda (the random effects precision)
@@ -236,13 +232,13 @@ for k = 1:num_iter
         
 %       sample delta (the error precision)         
                          
-           sq_diff = (sigma_obs-sigma_vpsc).^2;
+       sq_diff = (sigma_obs-sigma_vpsc).^2;
             
-           delta_chain(k+1) = gamrnd(S*N/2 + a_delta,...
+       delta_chain(k+1) = gamrnd(S*N/2 + a_delta,...
                 1/(b_delta + 1/2*(sum(sum(sq_diff))))); 
         
        %calculate log likelihood after gibbs step
-       [proposed_log_likelihood,vpsc_prop] = log_likelihood(theta_chain(k+1,:),Lambda_chain(:,:,k+1),delta_chain(k+1),sigma_obs,strain_inc,sigma_vpsc,b); 
+       [proposed_log_likelihood,vpsc_prop] = log_likelihood(S,N,D,theta_chain(k+1,:),Lambda_chain(:,:,k+1),delta_chain(k+1),sigma_obs,strain_inc,sigma_vpsc,b); 
             
        %calculate log posterior after gibbs step
        proposed_log_posterior = log_posterior(proposed_log_likelihood,theta_chain(k+1,:),Delta_chain(:,:,k+1),delta_chain(k+1),a_delta,b_delta,V_not,v_not,D);
