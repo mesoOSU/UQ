@@ -1,78 +1,66 @@
-%This is the same as MCMC_random_variance except the Voce parameters
-%are not rounded and no variance limit is set
-%parameters are initiated at past MAP parameter values
-
-% ADAPTIVE
-% BLOCKS                                     
+                              
 
 %% FOLDER SETUP
-addpath(pwd)
-addpath(':/users/PAS1064/osu8614/Bayesian Inference/VPSC_MCMC_Gamma_06/Psi_0_6RandEff/MCMC')
-
-PATH = getenv('PATH');
-setenv('PATH', [PATH ':/users/PAS1064/osu8614/Bayesian Inference/VPSC_MCMC/VPSC_MCMC_Gamma_06/Psi_0_6RandEff/vpsc7d_virgin',...
-                     ':/users/PAS1064/osu8614/Bayesian Inference/VPSC_MCMC/VPSC_MCMC_Gamma_06/Psi_0_6RandEff/MCMC']);
-
-[filepath] = fileparts(which('MCMC_current_wishart.m'));
+[filepath] = fileparts(which('MCMC.m'));
 parts = strsplit(filepath, '/');
 path = strjoin(parts(1:end-1),'/');
 
+addpath(sprintf('%s/MCMC',path))
+addpath(sprintf('%s/vpsc7d_virgin',path))
+
 figure_path = strcat(strjoin(parts(1:end-1),'/'),'/figures');
 
+PATH = getenv('PATH');
+
+setenv('PATH', [PATH sprintf(':%s/MCMC',path),...
+                     sprintf(':%s/vpsc7d_virgin',path)]);
+                     
 %Navigate to correct path to run VPSC code
 cd(sprintf('%s//vpsc7d_virgin',path)) 
 
-%% USER DEFENITIONS
+%load data
+FFT_data = load(sprintf('%s//FFT_Plastic_Data_06.mat',path)); %150x6 array
+n_data = size(FFT_data.SVM,2);
 
-number_iterations = 100000;
+%% USER DEFENITIONS
+initial_start = 0; %flag for initial start or continuation of chain
+
+num_iter = 100000;
 
 %Diagnostics
 iter_start = 1; 
 iter_check = 1000; 
+num_par = 4; % number of unknown parameters
 
-%load data
+store = 500; %frequency of drawing samples from the posterior and posterior predictive distributions
 
-FFT_data = load(sprintf('%s//FFT_Plastic_Data_06.mat',path)); %150x6 array
-n_data = size(FFT_data.SVM,2);
+import_cov_mat = load(sprintf('%s/MCMC/current_cov_mat.mat',path));
+cov_mat = cell(1,n_data + 1); %one block per random effect + 1 for overall effect 
 
-store = 500; %frequency of storing posterior predictive evaluations 
-                 %for uncertainty plot
-
-
-import_cov_mat = load(sprintf('%s/current_cov_mat.mat',path));
-cov_mat = cell(1,n_data + 1); %one block per data set, 1 proposal cov matrix per block 
-
- for i = 1:size(cov_mat,2)
-     cov_mat{i} = import_cov_mat.cov_mat{i};
- end    
+for i = 1:size(cov_mat,2)
+    if initial_start == 1 
+        cov_mat{i} = eye(num_par)*.1;
+    else
+        cov_mat{i} = import_cov_mat.cov_mat{i};
+    end    
+end    
                  
-start_fix = number_iterations;%100000;  %start adaptive proposal variance at this iteration
-stop_fix =  number_iterations;%100000; %end adaptive proposal variance at this iteration
-covariance_check = 1000;%100000; %frequency of adapting porposal variance based on acceptance rate
-full_adj = 1000;%100000; %frequency of adjusting prop_var with cov ratio
-%compare = zeros(length(proposal_variance),4); %store information on how proposal variance ratio is adjusted
-target_accept = [0.2,0.5];
+start_fix = 1;  %start adaptive proposal variance at this iteration
+stop_fix =  25000; %end adaptive proposal variance at this iteration
+covariance_check = 1000; %frequency of adapting proposal covariance matrices
 
-blocks = [1,1,1,1,...
-          2,2,2,2,...
-          3,3,3,3,...
-          4,4,4,4,...
-          5,5,5,5,...
-          6,6,6,6,...
-          7,7,7,7]; %define blocks
+target_accept = [0.2,0.5]; % target acceptance rates
       
 %% CREATE BLOCKS
  
-% parameter_index = [1,2,3,4,5,6,7,8]; %tau0, tau1, theta0, theta1, Theta1, Theta2, Theta3, Theta4
-theta_chain_index = 1:1:(n_data + 1)*4; %7*voce
+theta_chain_index = 1:1:length(blocks); 
 u = unique(blocks);
 num_blocks = length(u);
 block_index = cell(1,num_blocks);
 ml_par = cell(1,num_blocks);
-% variance_index = cell(1,num_blocks);
+
 for nn = 1:num_blocks
     block_index{nn} = theta_chain_index(blocks == u(nn));
-%     variance_index{nn} = proposal_variance(blocks == u(nn)); 
 end
 
 %% LOAD DATA AND SET CODE DEFENITIONS
@@ -81,7 +69,7 @@ end
 sigma_obs = zeros(size(FFT_data.SVM,1),n_data);
 
 S = size(sigma_obs,2);
-D = 4;
+D = num_par;
 N = length(sigma_obs);
 
 for i = 1:S
@@ -90,18 +78,10 @@ end
 
 strain_inc = FFT_data.EVM;
 
-%define hyper-parameters for precision gamma prior distributions 
-a_tau = 1;      %.01; %2.5; %SHAPE parameter
-b_tau = 0.1;   %.01; %50; %RATE parameter - MATLAB uses a SCALE parameter so inverse must be taken
-a_xi = 1;     %.01;%.01; %1.1; %SHAPE parameter
-b_xi = 0.1;       %.01; %7; %RATE parameter - MATLAB uses a SCALE parameter so inverse must be taken
-
 %Proposal Distribution
 proposal_sample = @(mu,proposal_variance) mvnrnd(mu,proposal_variance);
 
 % Initialize vectors
-num_iter = number_iterations; %number of iterations
-
 theta_chain = zeros(num_iter+1,(S + 1)*D); %chain holding accepted values for theta^1,...,theta^S,theta*
 Delta_chain = zeros(D,D,num_iter+1); %chain holding inverse covariance matrix
 delta_chain = zeros(num_iter+1,1); %chain holding error precision
@@ -113,65 +93,53 @@ ppd_draw = zeros(N,num_iter/store); %initiate array for model evaluations from p
 
 %% INITIALIZE MARKOV CHAIN
 
+%define hyper-parameters for precision gamma prior distributions 
+a_delta = 1;    %SHAPE parameter
+b_delta = 0.1;  %RATE parameter - MATLAB uses a SCALE parameter so inverse must be taken when using built-in gamma functions
+
+%define hyperparameters for wishart prior on random effects precision
+v_not = D+1; %scalar
+V_not = eye(D); %DxD positive-definite symmetric matrix
+
 % initiation of Markov Chain
 import_last_parameters = load(sprintf('%s/current_parameters.mat',path));
 
-theta_chain(1,:) = import_last_parameters.current_parameters{1};
-%theta_chain(1,S*D + 1:end) = [55 55 700 220];
+if initial_start == 1
 
-Delta_chain(:,:,1) = import_last_parameters.current_parameters{2};
+    theta_chain(1,:) = repmat([55 55 700 150],1,S+1);   
+    Lambda_chain(:,:,1) = v_not.*V_not; % start at expected value
+    delta_chain(1,:) = a_delta/b_delta; % start at expected value
+    
+else
 
-delta_chain(1,1) = import_last_parameters.current_parameters{3};
+    theta_chain(1,:) = import_last_parameters.current_parameters{1};
+    Lambda_chain(:,:,1) = import_last_parameters.current_parameters{2};
+    delta_chain(1,1) = import_last_parameters.current_parameters{3};
 
-%scalar
-v_not = D;
-
-%V_not = import_last_parameters.current_parameters{4};
-V_not = eye(D);
+end
 
 sigma_vpsc = zeros(N,S); %initiate array for holding VPSC_stress, used in log likelihood evaluation 
 
-tic
+
 for i = 1:S
     sigma_vpsc(:,i) = VPSC(theta_chain(1,i*D-3),theta_chain(1,i*D-2),theta_chain(1,i*D-1),theta_chain(1,i*D),strain_inc);
 end
-toc
 
-[initial_log_likelihood,vpsc_prop] = log_likelihood(theta_chain(1,:),Delta_chain(:,:,1),delta_chain(1),sigma_obs,strain_inc,sigma_vpsc,1); %likelihood of initiation parameters, 1is for block 1
+[initial_log_likelihood,vpsc_prop] = log_likelihood(theta_chain(1,:),Lambda_chain(:,:,1),delta_chain(1),sigma_obs,strain_inc,sigma_vpsc,1); %likelihood of initiation parameters, 1is for block 1
 sigma_vpsc = vpsc_prop;
 
-initial_log_posterior = log_posterior(initial_log_likelihood,theta_chain(1,:),Delta_chain(:,:,1),delta_chain(1),a_tau,b_tau,V_not,v_not,D);
+initial_log_posterior = log_posterior(initial_log_likelihood,theta_chain(1,:),Delta_chain(:,:,1),delta_chain(1),a_delta,b_delta,V_not,v_not,D);
 
 log_post(1,1) = initial_log_posterior;
 previous_log_posterior = log_post(1,1);
 
-%% Run this section to start chain from a previous iteration
-% k =91325; %iteration to restart chain
-% for i = 1:size(yin,2)
-%     sigma_vpsc(:,i) = VPSC(theta_chain(k,i*4-3),theta_chain(k,i*4-2),...
-%        theta_chain(k,i*4-1),theta_chain(k,i*4),strain_inc);
-% end
-% 
-% % 
-% logposterior_previous = log_post(k,1);
-%
-% proposal_variance = pvar_store_temp(floor(k/covariance_check)+1,:);
-%%% proposal_variance = pvar_store(floor(k/covariance_check)+1,:);
-%% MCMC LOOP
-   
-tic
-%ktic = tic;
-for k = 1:num_iter
 
-   % if mod(k,100) == 0
-%        disp(['iteration = ',num2str(k),'  time for last 100 = ',num2str(toc(ktic))])
-%        ktic = tic;
-%    end
+%% MCMC LOOP   
+tic
+for k = 1:num_iter
      
      if mod(k,covariance_check) == 0
-         
-%          pvar_store(k/covariance_check+1,:) = proposal_variance;
-%            pvar_store_temp(k/covariance_check + 1,:) = cov_mat;
+
          if k <= stop_fix && k >= start_fix
          
              accept_rate = (1 + sum(acceptance(k-covariance_check + 1:k,:)))./covariance_check;
@@ -180,9 +148,9 @@ for k = 1:num_iter
             
                 if accept_rate(aa) < target_accept(1) || accept_rate(aa) > target_accept(2)
                     
-                    cov_mat{aa}(logical(eye(D))) = cov_mat{aa}(logical(eye(D))).*accept_rate(aa)./(target_accept(1) + range(target_accept)/2);
-                    cov_mat_adj = full_cov_mat_adj(theta_chain(k-covariance_check+1:k,blocks == aa),D,cov_mat{aa});
-                    cov_mat{aa} = cov_mat_adj;   
+                    C = cov(theta_chain(k-covariance_check+1:k,blocks == aa));
+                    cov_mat{aa}(logical(eye(D))) = diag(C).*accept_rate(aa)./(target_accept(1) + range(target_accept)/2);
+                    cov_mat{aa} = full_cov_mat_adj(theta_chain(k-covariance_check+1:k,blocks == aa),D,cov_mat{aa});                 
                     
                 end   
              end 
@@ -193,8 +161,7 @@ for k = 1:num_iter
     
     for b = 1:length(unique(blocks))
       
-        % the following constraints only apply to voce parameters
-            
+        % the following constraints only apply to voce parameters            
          Kosher = 0;
         
          while Kosher ==0
@@ -220,13 +187,13 @@ for k = 1:num_iter
             
             u = unifrnd(0,1);
    
-            [proposed_log_likelihood,vpsc_prop] = log_likelihood(proposed_parameter,Delta_chain(:,:,k),delta_chain(k),sigma_obs,strain_inc,sigma_vpsc,b); %likelihood of proposed (k)
+            [proposed_log_likelihood,vpsc_prop] = log_likelihood(proposed_parameter,Lambda_chain(:,:,k),delta_chain(k),sigma_obs,strain_inc,sigma_vpsc,b); %likelihood of proposed (k)
             %yout updates the column of yin which corresponds to the
             %current block. VPSC is evaluated at proposed parameters and saved in yin(block)
             %if the parameters are accepted yin = yout, if not, yin not
             %updated
       
-            proposed_log_posterior = log_posterior(proposed_log_likelihood,proposed_parameter,Delta_chain(:,:,k),delta_chain(k),a_tau,b_tau,V_not,v_not,D);
+            proposed_log_posterior = log_posterior(proposed_log_likelihood,proposed_parameter,Lambda_chain(:,:,k),delta_chain(k),a_delta,b_delta,V_not,v_not,D);
     
             if log(u) < proposed_log_posterior-previous_log_posterior
                 theta_chain(k+1,block_index{b}) = proposed_parameter(block_index{b}); %save parameter to next iteration in chain & parameters stay in proposal
@@ -257,41 +224,30 @@ for k = 1:num_iter
     %sample delta and Lambda from full conditional (gibbs sampler)
         %samples directly from posterior, always accepted
         
-        %sample xi (the sample precision)
+        %sample Lambda (the random effects precision)
        
         sq_diff_pars = zeros(D,D);
              for i = 1:S
                  sq_diff_pars = sq_diff_pars + (theta_chain(k+1,D*i-3:D*i) - theta_chain(k+1,S*D+1:end))'*(theta_chain(k+1,D*i-3:D*i) - theta_chain(k+1,S*D+1:end));
              end
-          
-%          C = sq_diff_pars/5; %sample covariance   
-%          for i = 1:D
-%             for j = 1:D
-%                 Correlation(i,j) = C(i,j)/(sqrt(C(i,i))*sqrt(C(j,j)));
-%             end
-%          end
-         
-
-        % W = wishrnd(Sigma,df) generates a random matrix W having the Wishart distribution with covariance matrix Sigma and with df degrees of freedom
-        Delta_chain(:,:,k+1) = wishrnd((V_not\eye(D) + sq_diff_pars)\eye(D),v_not + S);
+        
+       Lambda_chain(:,:,k+1) = wishrnd((V_not\eye(D) + sq_diff_pars)\eye(D),v_not + S);
                 
         
-%       sample tau (the error precision)
-          
+%       sample delta (the error precision)         
                          
-            sq_diff = (sigma_obs-sigma_vpsc).^2;
+           sq_diff = (sigma_obs-sigma_vpsc).^2;
             
-           delta_chain(k+1) = gamrnd(S*N/2 + a_tau,...
-                1/(b_tau + 1/2*(sum(sum(sq_diff))))); 
+           delta_chain(k+1) = gamrnd(S*N/2 + a_delta,...
+                1/(b_delta + 1/2*(sum(sum(sq_diff))))); 
         
        %calculate log likelihood after gibbs step
-       [proposed_log_likelihood,vpsc_prop] = log_likelihood(theta_chain(k+1,:),Delta_chain(:,:,k+1),delta_chain(k+1),sigma_obs,strain_inc,sigma_vpsc,b); 
+       [proposed_log_likelihood,vpsc_prop] = log_likelihood(theta_chain(k+1,:),Lambda_chain(:,:,k+1),delta_chain(k+1),sigma_obs,strain_inc,sigma_vpsc,b); 
             
        %calculate log posterior after gibbs step
-       proposed_log_posterior = log_posterior(proposed_log_likelihood,theta_chain(k+1,:),Delta_chain(:,:,k+1),delta_chain(k+1),a_tau,b_tau,V_not,v_not,D);
+       proposed_log_posterior = log_posterior(proposed_log_likelihood,theta_chain(k+1,:),Delta_chain(:,:,k+1),delta_chain(k+1),a_delta,b_delta,V_not,v_not,D);
                 
-       previous_log_posterior = proposed_log_posterior; 
-        
+       previous_log_posterior = proposed_log_posterior;        
     
         
     log_post(k+1) = previous_log_posterior; %only save log posterior at the end of the block cycle (once per iteration)
@@ -307,7 +263,7 @@ for k = 1:num_iter
         
         
         % Genereate Posterior Predictive Distribution
-         ppd_draw = post_pred_draw(N,S,D,theta_chain(k+1,:),Delta_chain(:,:,k+1),delta_chain(k+1),...
+         ppd_draw = post_pred_draw(N,S,D,theta_chain(k+1,:),Lambda_chain(:,:,k+1),delta_chain(k+1),...
             block_index,strain_inc,sigma_obs,ppd_draw,k,store,figure_path);      
         
     end
@@ -355,19 +311,18 @@ for k = 1:num_iter
         %save('/users/PAS1064/osu8614/Bayesian Inference/Wishart_Gibbs_Step/figures/iterations50_100.mat')
         %save('/users/PAS1064/osu8614/Bayesian Inference/Wishart_Gibbs_Step/figures/current_cov_mat.mat', 'cov_mat')
         current_parameters{1} = theta_chain(k,:);
-        current_parameters{2} = Delta_chain(:,:,k);
+        current_parameters{2} = Lambda_chain(:,:,k);
         current_parameters{3} = delta_chain(k);
         current_parameters{4} = V_not;
         
-        save( fullfile(figure_path,'current_parameters.mat'),'current_parameters')   
-    
+        save( fullfile(figure_path,'current_parameters.mat'),'current_parameters')       
              
         catch 
         sprintf('Invalid file identifier in iteration (%i,%i), no diagnostics created. Continuing to next iteration',k,b)
         save(fullfile(figure_path,'100K.mat'))
         save(fullfile(figure_path,'current_cov_mat.mat'), 'cov_mat')
         current_parameters{1} = theta_chain(k,:);
-        current_parameters{2} = Delta_chain(:,:,k);
+        current_parameters{2} = Lambda_chain(:,:,k);
         current_parameters{3} = delta_chain(k);
         current_parameters{4} = V_not;
         save( fullfile(figure_path,'current_parameters.mat'),'current_parameters')
