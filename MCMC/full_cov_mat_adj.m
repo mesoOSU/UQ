@@ -1,4 +1,4 @@
-function cov_mat_adj = full_cov_mat_adj(par,D,cov_mat_adj)
+function cov_mat_new = full_cov_mat_adj(par,D,cov_mat_orig)
 
     %adjust the ratio of the proposal variances based on the covariance of
     %the parameters
@@ -22,7 +22,7 @@ function cov_mat_adj = full_cov_mat_adj(par,D,cov_mat_adj)
         end
     end
 
-    pvars = diag(cov_mat_adj)/def_by;
+    pvars = diag(cov_mat_orig)/def_by;
 
     for rr = 1:D
         for cc = 1:D
@@ -34,11 +34,11 @@ function cov_mat_adj = full_cov_mat_adj(par,D,cov_mat_adj)
 
     for dd = 1:D
         if tempvar(dd)<=0
-            temp_stepvar_chain(dd,dd) = cov_mat_adj(dd,dd);
+            temp_stepvar_chain(dd,dd) = cov_mat_orig(dd,dd);
         end
     end
 
-    cov_mat_adj = temp_stepvar_chain;
+    cov_mat_new = temp_stepvar_chain;
     
 %**% In your case, I don't forsee needing these lines
 %     [~,posdef] = chol(temp_stepvar_chain);
