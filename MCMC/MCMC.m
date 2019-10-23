@@ -298,7 +298,7 @@ for k = 1:num_iter
         disp(num2str(acceptance_ratio))
         
         for zz = 1:num_blocks 
-            [ml_voce] = diagnostic_test(theta_chain(1:k,block_index{zz}),log_post,k,zz,sigma_obs,strain_inc,0,iter_start,figure_path);
+            [ml_voce] = diagnostics(theta_chain(1:k,block_index{zz}),log_post,k,zz,sigma_obs,strain_inc,0,iter_start,figure_path);
             ml_par{zz} = ml_voce;
         end
         
