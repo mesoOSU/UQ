@@ -1,25 +1,11 @@
-%This is the log likelihood function for the random effects model.
-
-%yture is (150x6) 150 data points in each of six data sets
-% par is N x (4 x 7)
-
-function [log_likelihood,prop_vpsc] = log_likelihood(curr_theta,curr_Delta,curr_delta,sigma_obs,strain_inc,sigma_vpsc,block)
-
-S = size(sigma_obs,2);
-D = 4;
-N = length(sigma_obs);
+function [log_likelihood,prop_vpsc] = log_likelihood(S,N,D,curr_theta,curr_Delta,curr_delta,sigma_obs,strain_inc,sigma_vpsc,block)
 
 curr_re_tau0 = curr_theta(1:D:S*D);
 curr_re_tau1 = curr_theta(2:D:S*D);
 curr_re_theta0 = curr_theta(3:D:S*D);
 curr_re_theta1 = curr_theta(4:D:S*D);
 curr_inv_delta = 1/curr_delta;
-%par(25:28 hold the super parameters)
 
-%covariance matrix for the observation error, including model discripancy
-%for the initial 'fix' points
-
-%err_cov_mat = diag(repmat(curr_inv_delta,1,T)); 
 err_pr_mat = diag(repmat(curr_delta,1,N));
 
 % Pre-allocate 
@@ -27,9 +13,9 @@ log_like_between = 0;
 log_like_within = 0;
 
 prop_vpsc = sigma_vpsc;
+
 if block <= 6
-prop_vpsc(:,block) = VPSC(curr_re_tau0(block),curr_re_tau1(block),curr_re_theta0(block),curr_re_theta1(block),strain_inc);
-%replace one column of prop_vpsc with VPSC evaluated at proposed parameters
+    prop_vpsc(:,block) = VPSC(curr_re_tau0(block),curr_re_tau1(block),curr_re_theta0(block),curr_re_theta1(block),strain_inc);
 end
 
     Z1 = -D*log(2*pi) + log(det(curr_Delta));
