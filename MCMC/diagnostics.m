@@ -1,4 +1,4 @@
-function [ml_parameters] = diagnostic_test(par,log_posterior,k,zz,sigma_obs,strain_inc,final,iter_start,figure_path)
+function [ml_parameters] = diagnostics(par,log_posterior,k,zz,sigma_obs,strain_inc,final,iter_start,figure_path)
 
 if zz <= 7
     npar = size(par,2);
