@@ -1,0 +1,52 @@
+UNCERTAINTY QUANTIFICATION USING THE RANDOM EFFECTS HIERARCHICAL BAYESIAN INFERENTIAL FRAMEWORK
+
+This uses a random effects hierarchical model for inference and prediction in the phenomenological VPSC model 
+\cite
+Tomé, C. N., and R. A. Lebensohn. 
+"Manual for Code visco-plastic self-consistent (vpsc)." 
+Los Alamos National Laboratory, New Mexico, USA (2009).
+
+Inference is performed on unknown components of the data generation process
+(model parameters, observation error, sample-to-sample variance etc.),
+and used to estimated the uncertainty in their true values:
+
+Unknown parameters in the statistical model:
+Voce hardening parameters (thetas)
+Random effects precision matrix (Lambda)
+Observation error precision (delta)
+
+Here, we make the assumption the observation error is i.i.d
+
+MCMC simulations are state of the art for sampling from the posterior distribution of interest.
+The Voce hardening parmeters (thetas) are sampled in a Metropolis-Hastings step and both precisions (Lambda and delta)
+are sampled from full-conditionals in Gibbs steps
+
+The optimal proposal covariance matrices are found through an adaptation based on the covariance of the 
+accepted parameters, the acceptance rates and the target acceptance rates
+
+Parameters are proposed and accepted/rejected in blocks, where each block consists of the model parameters
+for each random effect
+
+Observations of the state were generated with the physics-based elasto-viscoplastic FFT model,
+
+\cite
+Zhao, Pengyang, et al.
+"An integrated full-field model of concurrent plastic deformation and microstructure evolution: 
+application to 3D simulation of dynamic recrystallization in polycrystalline copper." 
+International Journal of Plasticity 80 (2016): 38-55.
+
+\cite
+Lebensohn, R.A., Kanjarla, A.K., Eisenlohr, P., 2012.
+An elasto-viscoplastic formulation based on fast Fourier transforms for the prediction of micromechanical
+fields in polycrystalline materials. Int. J. Plast. 32, 59e69.
+
+Only the plastic region was used in the calibration of the VPSC model. 
+This allows us to make the reasonable assumption that the model
+is correct and model discrepancy is not included in this simulation
+
+Results of this MCMC simulation are published in,
+\cite
+Ricciardi, Denielle E., Oksana A. Chkrebtii, and Stephen R. Niezgoda. 
+"Uncertainty Quantification for Parameter Estimation and Response Prediction." 
+Integrating Materials and Manufacturing Innovation 8.3 (2019): 273-293.
+
