@@ -30,7 +30,8 @@ accepted parameters, the acceptance rates and the target acceptance rates
 Parameters are proposed and accepted/rejected in blocks, where each block consists of the model parameters
 for each random effect
 
-Observations of the state were generated with the physics-based elasto-viscoplastic FFT model,
+Observations of the state were generated with the physics-based elasto-viscoplastic FFT model. This data
+was simulated to mimic a worst-case scenario for sample-to-sample variability.
 
 \cite
 Zhao, Pengyang, et al.
