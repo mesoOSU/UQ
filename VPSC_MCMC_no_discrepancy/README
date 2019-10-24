@@ -1,5 +1,8 @@
 UNCERTAINTY QUANTIFICATION USING THE RANDOM EFFECTS HIERARCHICAL BAYESIAN INFERENTIAL FRAMEWORK
 
+This code is to be run in MATLAB. 
+MCMC.m found in VPSC_MCMC_no_discrepancy/MCMC/ is the main program file
+
 This uses a random effects hierarchical model for inference and prediction in the phenomenological VPSC model 
 \cite
 Tomé, C. N., and R. A. Lebensohn. 
