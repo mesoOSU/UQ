@@ -1,0 +1,45 @@
+This repository contains the necessary directories and files to perform the Bayesian uncertainty
+anlaysis presented in "Uncertainty Quantification Accounting for Model Discrepancy Within 
+a Random Effects Bayesian Framework" - Denielle E. Ricciardi, Oksana A. Chkrebtii, Stephen R. Niezgoda, IMMI (2020)
+
+Uncertainty in the unknown Voce hardening parameters within the VPSC crystal platicity code 
+are determined by calibrating to simulated data. The posterior distribution over all unknown parameters
+is determined numerically through an MCMC simulation using an adaptive Metropolis-Hastings algorithm with Gibbs updates
+where appropriate. Full details on the statistical model and derivations of full-conditional distribtuions
+can be found in the publication. This code is written for MATLAB.
+
+vpsc7d_virgin - contains all necessary files to run the VPSC crystal plastiticy code
+MCMC - contains all necessary files to perform simulation targeting the posterior distribution
+figures - all diagnostic plots and files will be saved to this directory
+FFT_Simulated_Data - file containing simulated data used for calibration
+MCMC.m - in the MCMC directory is the main source file to be run in MATLAB
+
+Example Usage
+ 	Parameter estimation for the VPSC model (Tome and Lebensohn)
+ 	taking into account various sources of uncertainty stemming 
+ 	from noisy and/or inconsistent data (both epistemic and
+    aleatoric) and model-form error
+
+Unknown Parameters
+	theta^[s]: VPSC model parameters for the random effects
+		sampled in MH steps (blocks 1:S)
+	theta: VPSC model parameters for overall effect
+		sampled in MH steps (block S+1)
+	Lambda: Random effects precision - not sampled directly
+	R: Decomposed correlation of Lambda
+		sampled in Gibbs step
+	t2: Decomposed variance of Lambda
+		sampled in MH step (block S+2)
+	de1ta: Error precision
+		sampled in Gibbs step
+	Delta: Discrepancy (Model-form error)
+		sampled in Gibbs step
+
+ Output
+	k = 'num_iter' samples targeting the posterior distribution of 
+	all relavent parameters as well as posterior and posterior
+    predictive samples
+
+
+Copyright (c) 2020, Denielle Ricciardi
+All rights reserved.                  
