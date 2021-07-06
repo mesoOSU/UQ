@@ -1,0 +1,391 @@
+%% Load emulation data
+addpath(genpath('basis'))
+load('train_data_new.mat') % This is generated training data set but you can generate your own using as below.
+
+%% To derive training data and observed data for VPSC model
+%% pars : training calibration parameter
+% m_design = zeros(length(strain_inc),length(pars)); 
+% for i = 1:length(pars)
+%     m_design(:,i) =
+%     VPSC(pars(i,1),pars(i,2),pars(i,3),pars(i,4),strain_inc); % trainig
+%     output
+% end
+% par_true = [55;55;700;200]; % Assumed ground true parameter value
+% m_true =
+% VPSC(par_true(1),par_true(2),par_true(3),par_true(4),strain_inc);
+% y_obs = m_true'+mvnrnd(0,sigma^2,200); % Observed materials reseponse
+
+
+%% If you would like to test the algorithm, the lines below might help
+%c_design = c_design(:,151:201);
+%m_design = m_design(:,151:201);
+%pars = pars(151:201,:);
+
+%% Setup
+
+y_proj = b_proj*y_obs; % project observed materials response to spline coefficient space
+
+N = 100000; % The number of MCMC iterations
+chainpars = zeros(size(pars,2),N); % For recording parameters during MCMC iterations
+chainpars(:,1) = [55;55;700;200]; % Initial parameter values
+c_sample = zeros(size(c_design,1),N); % For recording basis coefficients during MCMC iterations
+c_sample(:,1) = b_proj*y_obs; % Initial coefficient values
+
+c = c_sample(:,1); % Initial basis coeffients
+theta = chainpars(:,1)'; % Initial parameters
+sigma = sqrt(0.5); % Standard deviation of the error term in the response model
+npars = 4; % The number of parameters
+log_post = zeros(1,N); % For recording unnormalized log posterior densities during MCMC iterations
+
+%% Hyperparameters (estimated through MLE using training data)
+tau = 1e-10;
+gpsigma = 80;
+phi = [285.163;117.651;612.362;945.997];
+
+%% Prior distributions
+thetapdf = @(t)logmvnpdf(t,[55 55 700 200],diag([10 10 20 20]));
+
+%% Obtain initial covariance matrix 
+
+    cov_thetas = cov_sqexp([theta;pars;theta],gpsigma,tau,phi);
+    gp_cov = zeros(size(c_design,1)*(size(c_design,2)+2));
+    a = size(c_design,1);
+    b = size(c_design,2);
+    for i = 1:size(c_design,2)+2
+        for j = 1:size(c_design,2)+2
+            gp_cov((a*i-a+1):a*i,(a*j-a+1):a*j) = diag(repmat(cov_thetas(i,j),size(c_design,1),1));
+        end
+    end
+    
+    gp_cov(a*(b+2)-a+1:a*(b+2),a*(b+2)-a+1:a*(b+2)) = gp_cov(a*(b+2)-a+1:a*(b+2),a*(b+2)-a+1:a*(b+2)) + sigma^2*b_inv;
+    
+% Initial unnormalized log posterior density
+log_post(1,1) = joint_pdf(y_proj,c_design,pars,theta,b_inv,c,sigma,gpsigma,tau,phi,"squared_exponential") + thetapdf(theta);
+
+%% Setup for Adaptive MH
+    
+k = 1;
+div_iter_by = 1000;
+stepvar_chain = diag([5,5,5,5]);
+temp_stepvar_chain = diag([5,5,5,5]);
+checknum_stop_fix = 10000;
+accepts = zeros(checknum_stop_fix,1);
+rate = zeros(checknum_stop_fix,1);
+   
+blocobj.blocnum = 4;
+blocobj.bloctarget{1} = [0.2 0.55];
+blocobj.bloctarget{2} = [0.2 0.55];
+blocobj.bloctarget{3} = [0.2 0.55];
+blocobj.bloctarget{4} = [0.2 0.55];
+
+%% MCMC Sampling
+
+for iter = 1:N
+    
+    % Draw next basis coefficient using the full conditional distribution
+    [c,loglik_c] = full_cond(c_design,y_proj,gp_cov); 
+    
+    % MH step to draw next parameter values
+    theta_prop = mvnrnd(theta,stepvar_chain); % Propose a candidate sample
+    
+    t = rand;
+    % Derive the joint log-likelihood given the proposed parameter values
+    [f, gp_cov_prop] = joint_pdf(y_proj,c_design,pars,theta_prop,b_inv,c,...
+            sigma,gpsigma,tau,phi,"squared_exponential");
+    loglik_cand = f + thetapdf(theta_prop); % Add log-prior
+    
+    if log(t) <= loglik_cand - (loglik_c + thetapdf(theta))
+        theta = theta_prop; % Update the parameter values if accepted
+        accepts(k,:) = accepts(k,:) + 1; % Record acceptance rate for variance adaptation
+        log_post(1,iter+1) = loglik_cand; % Record unnormalized log posterior density
+        gp_cov = gp_cov_prop; % Update covariance matrix
+    else
+        log_post(1,iter+1) = loglik_c + thetapdf(theta);
+    end
+    
+    chainpars(:,iter+1) = theta';
+    c_sample(:,iter+1) = c;
+
+    % Adaptation of proposal variance
+    if rem(iter,div_iter_by) == 0
+        
+        k = k + 1;
+        checknum_ind = iter/div_iter_by;
+        
+        rate(checknum_ind,:) = ( 1 + accepts(checknum_ind,:))./(div_iter_by + 2);
+        
+            for aa = 1:blocobj.blocnum
+
+                if (checknum_ind <= checknum_stop_fix) && (rate(checknum_ind,:) < blocobj.bloctarget{aa}(1) || rate(checknum_ind,:) > blocobj.bloctarget{aa}(2))  % Note that I stop making adjustments by kjk_stop_fix iterations
+                    
+                    stepvar_chain(aa,aa) = stepvar_chain(aa,aa)*rate(checknum_ind,:)/(blocobj.bloctarget{aa}(1) + range(blocobj.bloctarget{aa})/2);
+                    
+                end
+                % target acceptance rates are 44% for one dimension decaying down to 23% for 5 and more dimensions
+                
+            end
+        
+        if checknum_ind <= checknum_stop_fix
+        try
+            
+            span = (iter-div_iter_by+1):iter;
+            chaincorr = corr(chainpars(:,span)');
+            chaincorr(isnan(chaincorr)) = 0;
+            new_step_cor = zeros(npars,npars);
+            
+                  for rr = 1:npars
+                        for cc = 1:npars
+                            if (rr==cc)
+                                new_step_cor(rr,cc) = 1;
+                            elseif (abs(chaincorr(rr,cc))<0.4)
+                                new_step_cor(rr,cc)=0;
+                            else
+                                new_step_cor(rr,cc) = sign(chaincorr(rr,cc))*(abs(chaincorr(rr,cc))-0.2);
+                            end
+                        end
+                  end
+                   
+                  for rr = 1:npars
+                        for cc = 1:npars
+                            stepvar_chain(rr,cc) = new_step_cor(rr,cc)*sqrt(stepvar_chain(rr,rr)*stepvar_chain(cc,cc));
+                        end
+                  end
+                  
+                  def_by = 10;
+                  pvars = diag(cov(chainpars(:,span)'))/def_by;
+                  
+                    for rr = 1:npars
+                        for cc = 1:npars
+                            temp_stepvar_chain(rr,cc) = new_step_cor(rr,cc)*sqrt(pvars(rr)*pvars(cc));
+                        end
+                    end
+                    
+                    tempvar = diag(temp_stepvar_chain);
+                    
+                    for dd = 1:npars
+                        
+                        if tempvar(dd)<=0
+                            temp_stepvar_chain(dd,dd) = stepvar_chain(dd,dd);
+                        end
+                        
+                    end
+                    
+                    [~,posdef] = chol(temp_stepvar_chain);
+                        
+                        if posdef ~= 0 || ~isnan(sum(sum(temp_stepvar_chain)))
+                            stepvar_chain = temp_stepvar_chain;
+                        end
+                  
+                  
+        catch
+            disp('Error in covariance update')
+            
+        end
+        
+        end
+    end
+end
+
+%% Diagnostic Plots
+% log posterior density
+plot(1:length(log_post),log_post)
+
+% Estimated mean response
+[row,col] = find(log_post==max(log_post));
+mode_est = VPSC(chainpars(1,col),chainpars(2,col),chainpars(3,col),chainpars(4,col),strain_inc);
+c_est = b_mat*[mean(c_sample(1,col));mean(c_sample(2,col));mean(c_sample(3,col));mean(c_sample(4,col));mean(c_sample(5,col))];
+
+bspline_comb = zeros(200,50000);
+for i = 50001:100000
+    bspline_comb(:,i-50000) = b_mat*[c_sample(1,i);c_sample(2,i);c_sample(3,i);c_sample(4,i);c_sample(5,i)];
+end
+
+bspline_upper = zeros(200,1);
+bspline_lower = zeros(200,1);
+for i = 1:200
+    bspline_upper(i,1) = quantile(bspline_comb(i,:),0.975);
+    bspline_lower(i,1) = quantile(bspline_comb(i,:),0.025);
+end
+
+
+plot(strain_inc,y_obs,'.','color',[0,0,0]+0.4,'MarkerSize', 5)
+xlabel('Von Mises Strain','FontSize',20)
+ylabel('Von Mises Stress (MPa)','FontSize',20)
+hold on
+plot(strain_inc,mode_est,'b','LineWidth',1)
+plot(strain_inc,c_est,'r','LineWidth',1)
+
+l = legend({'Experimental Data','Mode Parameters','Basis Spline'}, 'Location', 'southeast');
+set(l,'fontsize',20)
+axes('position',[0.2 0.65 0.28 0.25])
+box on % put box around new pair of axes
+indexOfInterest = (strain_inc < 0.22) & (strain_inc > 0.195); % range of t near perturbation
+plot(strain_inc(indexOfInterest),y_obs(indexOfInterest),'.','color',[0,0,0]+0.4,'MarkerSize', 10)
+hold on
+plot(strain_inc(indexOfInterest),mode_est(indexOfInterest),'b','LineWidth',1)
+plot(strain_inc(indexOfInterest),c_est(indexOfInterest),'r','LineWidth',1)
+axis tight
+hold off
+
+
+
+%% Correlation Contour plot
+
+make_it_tight = true;
+subplot = @(m,n,p) subtightplot (m, n, p, [0.01 0.01], [0.15 0.05], [0.15 0.05]);
+if ~make_it_tight,  clear subplot;  end
+pts = 53:0.05:57;
+bw = 0.2;
+subplot(4,4,1)
+[f,xi] = ksdensity(chainpars(1,30000:2:100000)',pts,'Bandwidth',bw);
+plot(xi,f,'b','LineWidth',2)
+min_1 = min(xi);
+max_1 = max(xi);
+
+pd = fitdist(chainpars(1,50000:2:100000)','normal');
+x_values = linspace(pd.mu-4*pd.sigma,pd.mu+4*pd.sigma,10000);
+y = pdf(pd,x_values);       
+%h = plot(x_values,y,'LineWidth',2);
+hold on 
+xline(55,'LineWidth',2)
+xline(chainpars(1,col),'r','LineWidth',2)
+xlim([min_1 max_1])
+ylabel('\tau_0','FontSize',15)
+set(gca, 'XTickLabel', [])
+ylim([0 max(f)*1.1])
+set(gca,'ytick',[])
+
+
+subplot(4,4,6)
+[f,xi] = ksdensity(chainpars(2,30000:2:100000)',pts,'Bandwidth',bw);
+plot(xi,f,'b','LineWidth',2)
+min_2 = min(xi);
+max_2 = max(xi);
+pd = fitdist(chainpars(2,50000:2:100000)','normal');
+x_values = linspace(pd.mu-4*pd.sigma,pd.mu+4*pd.sigma,10000);
+y = pdf(pd,x_values);       
+%h = plot(x_values,y,'LineWidth',2);
+set(gca, 'XTickLabel', [])
+set(gca, 'YTickLabel', [])
+hold on 
+xline(55,'LineWidth',2)
+xline(chainpars(2,col),'r','LineWidth',2)
+xlim([min_2 max_2])
+ylim([0 max(f)*1.1])
+
+pts = 694:0.05:705;
+subplot(4,4,11)
+[f,xi] = ksdensity(chainpars(3,30000:2:100000)',pts,'Bandwidth',bw);
+plot(xi,f,'b','LineWidth',2)
+min_3 = min(xi);
+max_3 = max(xi);
+pd = fitdist(chainpars(3,50000:2:100000)','normal');
+x_values = linspace(pd.mu-4*pd.sigma,pd.mu+4*pd.sigma,10000);
+y = pdf(pd,x_values);       
+%h = plot(x_values,y,'LineWidth',2);
+set(gca, 'XTickLabel', [])
+set(gca, 'YTickLabel', [])
+hold on 
+xline(700,'LineWidth',2)
+xline(chainpars(3,col),'r','LineWidth',2)
+xlim([min_3 max_3])
+ylim([0 max(f)*1.1])
+
+pts = 196:0.05:204;
+subplot(4,4,16)
+[f,xi] = ksdensity(chainpars(4,30000:2:100000)',pts,'Bandwidth',bw);
+plot(xi,f,'b','LineWidth',2)
+min_4 = min(xi);
+max_4 = max(xi);
+pd = fitdist(chainpars(4,50000:2:100000)','normal');
+x_values = linspace(pd.mu-4*pd.sigma,pd.mu+4*pd.sigma,10000);
+y = pdf(pd,x_values);       
+%h = plot(x_values,y,'LineWidth',2);
+set(gca, 'YTickLabel', [])
+xlabel('\xi_1','FontSize',15)
+hold on 
+xline(200,'LineWidth',2)
+xline(chainpars(4,col),'r','LineWidth',2)
+xlim([min_4 max_4])
+ylim([0 max(f)*1.1])
+set(gca,'xtick',[198 202],'xticklabel',{198,202})
+
+subplot(4,4,5)
+xb = linspace(min_1, max_1,20);
+yb = linspace(min_2, max_2,20);
+[xx,yy]=meshgrid(xb,yb,20);
+[r,~] = hist3(chainpars([1 2],30000:100000)',{xb yb});
+contour(xx,yy,r.','LineWidth',1)
+set(gca, 'XTickLabel', [])
+ylabel('\tau_1','FontSize',15)
+xlim([min_1 max_1])
+ylim([min_2 max_2])
+set(gca,'ytick',[54 56],'yticklabel',{54,56})
+
+
+subplot(4,4,9)
+xb = linspace(min_1, max_1,20);
+yb = linspace(min_3, max_3,20);
+[xx,yy]=meshgrid(xb,yb,20);
+[r,~] = hist3(chainpars([1 3],30000:100000)',{xb yb});
+contour(xx,yy,r.','LineWidth',1)
+set(gca, 'XTickLabel', [])
+ylabel('\xi_0','FontSize',15)
+xlim([min_1 max_1])
+ylim([min_3 max_3])
+set(gca,'ytick',[698 702],'yticklabel',{698, 702})
+
+subplot(4,4,10)
+xb = linspace(min_2, max_2,20);
+yb = linspace(min_3, max_3,20);
+[xx,yy]=meshgrid(xb,yb,20);
+[r,~] = hist3(chainpars([2 3],30000:100000)',{xb yb});
+contour(xx,yy,r.','LineWidth',1)
+set(gca, 'XTickLabel', [])
+set(gca, 'YTickLabel', [])
+xlim([min_2 max_2])
+ylim([min_3 max_3])
+
+subplot(4,4,13)
+xb = linspace(min_1, max_1,20);
+yb = linspace(min_4, max_4,20);
+[xx,yy]=meshgrid(xb,yb,20);
+[r,~] = hist3(chainpars([1 4],30000:100000)',{xb yb});
+contour(xx,yy,r.','LineWidth',1)
+xlabel('\tau_0','FontSize',15)
+ylabel('\xi_1','FontSize',15)
+xlim([min_1 max_1])
+ylim([min_4 max_4])
+set(gca,'xtick',[54 56],'xticklabel',{54,56})
+set(gca,'ytick',[198 202],'yticklabel',{198, 202})
+
+subplot(4,4,14)
+xb = linspace(min_2, max_2,20);
+yb = linspace(min_4, max_4,20);
+[xx,yy]=meshgrid(xb,yb,20);
+[r,~] = hist3(chainpars([2 4],30000:100000)',{xb yb});
+contour(xx,yy,r.','LineWidth',1)
+set(gca, 'YTickLabel', [])
+xlabel('\tau_1','FontSize',15)
+xlim([min_2 max_2])
+ylim([min_4 max_4])
+set(gca,'xtick',[54 56],'xticklabel',{54,56})
+
+subplot(4,4,15)
+xb = linspace(min_3, max_3,20);
+yb = linspace(min_4, max_4,20);
+[xx,yy]=meshgrid(xb,yb,20);
+[r,~] = hist3(chainpars([3 4],30000:100000)',{xb yb});
+contour(xx,yy,r.','LineWidth',1)
+set(gca, 'YTickLabel', [])
+xlabel('\xi_0','FontSize',15)
+xlim([min_3 max_3])
+ylim([min_4 max_4])
+set(gca,'xtick',[698 702],'xticklabel',{698,702})
+
+ 
+
+
+
+
+
